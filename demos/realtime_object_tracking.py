@@ -12,6 +12,54 @@ from normalflow.registration import normalflow, LoseTrackError
 from normalflow.utils import Frame
 from normalflow.viz_utils import annotate_coordinate_system
 
+
+import re
+import fcntl
+import struct
+
+
+VIDIOC_QUERYCAP = 0x80685600
+V4L2_CAP_VIDEO_CAPTURE = 0x00000001
+
+SENSOR_MAP = {
+    "DIGIT":        ["digit.yaml", "nnmodel_digit.pth"],
+    "GelSight Mini": ["gsmini.yaml","nnmodel.pth"],
+ }
+
+
+def is_capture_node(dev_id):
+    fmt = "16s32s32sII4I"
+    buf = struct.pack(fmt, b"", b"", b"", 0, 0, 0, 0, 0, 0)
+    try:
+        with open(f"/dev/video{dev_id}", "rb") as f:
+            result = fcntl.ioctl(f, VIDIOC_QUERYCAP, buf)
+        caps = struct.unpack(fmt, result)[4]
+        return bool(caps & V4L2_CAP_VIDEO_CAPTURE)
+    except Exception:
+        return False
+
+def detect_sensor():
+    for file in sorted(os.listdir("/sys/class/video4linux")):
+        name_path = os.path.realpath(f"/sys/class/video4linux/{file}/name")
+        with open(name_path) as f:
+            sysfs_name = f.read().strip()
+        dev_id = int(re.search(r"\d+$", file).group(0))
+        if not is_capture_node(dev_id):
+            continue
+        for sensor_name, file_list in SENSOR_MAP.items():
+            if sensor_name in sysfs_name:
+                return {
+                    "sensor": sensor_name,
+                    "device_index": dev_id,
+                    "device_path": f"/dev/video{dev_id}",
+                    "config": file_list[0],
+                    "model": file_list[1],
+                }
+
+    return None
+
+
+
 """
 This script demonstrates real-time using normalflow to track objects in contact.
 The implementation is using the long-horizon tracking algorithm discussed in our GelSLAM paper.
@@ -50,9 +98,13 @@ Press any key to quit the streaming session.
 """
 
 
-calib_model_path = os.path.join(os.path.dirname(__file__), "models", "nnmodel.pth")
-config_path = os.path.join(os.path.dirname(__file__), "configs", "gsmini.yaml")
+detected = detect_sensor()
+if detected is None:
+    raise RuntimeError("No tactile sensor found — is it plugged in?")
 
+calib_model_path = os.path.join(os.path.dirname(__file__), "models", detected["model"]) #nnmodel.pth
+config_path = os.path.join(os.path.dirname(__file__), "configs", detected["config"]) #gsmini.yaml
+print("Running normalflow with {} sensor, {} config file".format(detected["sensor"],detected["config"]))
 
 def resize_show(image, frame_name="frame", scale=2.5):
     image = cv2.resize(image, (0, 0), fx=scale, fy=scale)
@@ -100,6 +152,7 @@ def realtime_object_tracking():
     with open(args.config_path, "r") as f:
         config = yaml.safe_load(f)
         device_name = config["device_name"]
+        #device_name = input("Type device name (i.e. DIGIT or GelSight Mini)")
         ppmm = config["ppmm"]
         imgh = config["imgh"]
         imgw = config["imgw"]

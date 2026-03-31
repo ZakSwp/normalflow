@@ -1,0 +1,14 @@
+# Device Name
+device_name: "DIGIT"
+# Pixel Per Millimeter
+ppmm: 0.0405
+# Desired Image Width and Height should be equivalent to resized
+imgh: 240
+imgw: 320
+# Raw image width, height, and framerate
+raw_imgh: 480
+raw_imgw: 640
+framerate: 60
+# Path to calibration model (absolute, or relative to this config file)
+# calibration_model_path: "/home/zakaria/Desktop/gelslam/gelslam/src/gelslam/resources/example_calibration/model/nnmodel_digit.pth"
+

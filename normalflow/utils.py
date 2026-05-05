@@ -1,13 +1,23 @@
+import os, shutil
+
+
 import cv2
 import numpy as np
 from scipy.ndimage import binary_erosion
 from scipy.spatial.transform import Rotation as R
 
+
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import time
+from tqdm import tqdm
+
 class Frame:
     """
     The frame data structure.
     """
-    def __init__(self, G, H, C, contact_threshold=500):
+    def __init__(self, G, H, C, contact_threshold=500 ): #default: 500 for gsmini 56900 for digit
         """
         Initialize the frame with the gradient map, height map, and contact mask.
         """
@@ -212,3 +222,105 @@ def get_backproj_laplacian(L_tar, C_tar, masked_pointcloud_ref, tar_T_ref, ppmm=
     xy_region = np.logical_and(xx_region, yy_region)
     masked_C_tar_backproj = np.logical_and(masked_C_tar_backproj, xy_region)
     return masked_L_tar_backproj, masked_C_tar_backproj
+
+
+def render_surface_info(G, H, C):
+    pass
+def render_surface_info_video(frames, output_path='surface_info.mp4', fps=10):
+    """
+    frames: list of (G, H, C) tuples
+    """
+    writer = None
+
+    for G, H, C in tqdm(frames):
+        if isinstance(G, str) and G == "CRASH":
+            # Crash frame
+            crash_fig, crash_ax = plt.subplots(figsize=(15, 8))
+            crash_fig.patch.set_facecolor('black')
+            crash_ax.set_facecolor('black')
+            crash_ax.axis('off')
+            crash_ax.text(
+                0.5, 0.5,
+                f"CRASH\n{H}",  # H holds the error string in the sentinel
+                color='red',
+                fontsize=28,
+                fontweight='bold',
+                ha='center',
+                va='center',
+                transform=crash_ax.transAxes,
+                wrap=True
+            )
+            crash_fig.canvas.draw()
+            buf = np.frombuffer(crash_fig.canvas.buffer_rgba(), dtype=np.uint8)
+            buf = buf.reshape(crash_fig.canvas.get_width_height()[::-1] + (4,))
+            frame_bgr = cv2.cvtColor(buf[:, :, :3], cv2.COLOR_RGB2BGR)
+            plt.close(crash_fig)
+
+            if writer is None:
+                h, w = frame_bgr.shape[:2]
+                writer = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+            writer.write(frame_bgr)
+            continue  # skip normal rendering
+        fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+
+        im0 = axes[0,0].imshow(H, cmap='jet')
+        axes[0,0].set_title('Height Map')
+        plt.colorbar(im0, ax=axes[0,0])
+
+        axes[0,1].imshow(C, cmap='gray')
+        axes[0,1].set_title('Contact Mask')
+
+        magnitude = np.linalg.norm(G, axis=2)
+        im2 = axes[0,2].imshow(magnitude, cmap='hot')
+        axes[0,2].set_title('Gradient Magnitude')
+        plt.colorbar(im2, ax=axes[0,2])
+
+        im3 = axes[1,0].imshow(G[:,:,0], cmap='bwr')
+        axes[1,0].set_title('Gradient X')
+        plt.colorbar(im3, ax=axes[1,0])
+
+        im4 = axes[1,1].imshow(G[:,:,1], cmap='bwr')
+        axes[1,1].set_title('Gradient Y')
+        plt.colorbar(im4, ax=axes[1,1])
+
+        step = 10
+        Y, X = np.mgrid[0:G.shape[0]:step, 0:G.shape[1]:step]
+        axes[1,2].quiver(X, Y, G[::step, ::step, 0], -G[::step, ::step, 1])
+        axes[1,2].set_title('Gradient Field')
+        axes[1,2].invert_yaxis()
+
+        plt.tight_layout()
+
+        # Render figure to numpy array
+        fig.canvas.draw()
+        fig.canvas.draw()
+        buf = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+        buf = buf.reshape(fig.canvas.get_width_height()[::-1] + (4,))
+        buf = buf[:, :, :3] 
+        frame_bgr = cv2.cvtColor(buf, cv2.COLOR_RGB2BGR)
+        plt.close()
+
+        # Init writer on first frame
+        if writer is None:
+            h, w = frame_bgr.shape[:2]
+            writer = cv2.VideoWriter(
+                output_path,
+                cv2.VideoWriter_fourcc(*'mp4v'),
+                fps,
+                (w, h)
+            )
+
+        writer.write(frame_bgr)
+    if writer:
+        writer.release()
+        print(f"Saved to {output_path}")
+        
+
+
+
+def intialize_debug_folders(folderList):
+    for folder in folderList:
+        if os.path.exists(folder):
+            shutil.rmtree(folder)
+        os.makedirs(folder)
+        print("Initialized folder "+ folder + "\n")

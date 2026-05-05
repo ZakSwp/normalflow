@@ -59,7 +59,6 @@ def detect_sensor():
     return None
 
 
-
 """
 This script demonstrates real-time using normalflow to track objects in contact.
 The implementation is using the long-horizon tracking algorithm discussed in our GelSLAM paper.
@@ -77,10 +76,11 @@ Important Note:
       however, on some systems, it may introduce significant delays and duplicate frames.
     - If you are not using GelSight Mini, please calibrate your sensor using the gs_sdk package.
     - The whole calibration process only requires a metal ball with a known diameter and less than half hour.
-    - Provide the trained calibration model and the sensor configuration file as arguments when running.
+    - Provide the trained calibration model and the sensor configuration file as arguments when running. #NOT NEEDED SINCE THE IMPLEMENTATION OF DETECT SENSOR
 
 Usage:
     python realtime_object_tracking.py [--calib_model_path CALIB_MODEL_PATH] [--config_path CONFIG_PATH] [--device {cpu, cuda}]
+    python realtime_object_tracking.py --calib_model_path /home/zakaria/Desktop/normalflow/demos/models/nnmodel.pth --config_path /home/zakaria/Desktop/normalflow/demos/configs/gsmini.yaml --device cuda
 
 Arguments:
     --calib_model_path: (Optional) The directory where the calibration model are stored.
@@ -100,7 +100,7 @@ Press any key to quit the streaming session.
 
 detected = detect_sensor()
 if detected is None:
-    raise RuntimeError("No tactile sensor found — is it plugged in?")
+    raise RuntimeError("No tactile sensor found.")
 
 calib_model_path = os.path.join(os.path.dirname(__file__), "models", detected["model"]) #nnmodel.pth
 config_path = os.path.join(os.path.dirname(__file__), "configs", detected["config"]) #gsmini.yaml
@@ -226,6 +226,7 @@ def realtime_object_tracking():
                 frame_curr = Frame(G_curr, H_curr, C_curr)
                 if not frame_curr.is_contacted:
                     is_tracking = False
+                    print("STOPPED TRACKING")
                     break
 
                 # Use NormalFlow to estimate the transformation

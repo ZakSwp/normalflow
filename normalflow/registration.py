@@ -33,8 +33,8 @@ def normalflow(
     tar_T_ref_init=np.eye(4),
     ppmm=0.0634,
     n_samples=3000,
-    scr_threshold=0.3,
-    ccs_threshold=0.85,
+    scr_threshold=0.3, #0.3
+    ccs_threshold=0.85, #0.85
     return_quality=False,
     verbose=False,
 ):
@@ -78,6 +78,7 @@ def normalflow(
     tar_T_ref = tar_T_ref_init.copy()
     max_iters = 50
     for i in range(max_iters):
+        #print("CURRENT SCR = {} CCS = {}".format(scr_threshold, ccs_threshold)) #TODO: Delete
         # Remap the pointcloud
         remapped_pointcloud_ref = (
             np.dot(tar_T_ref[:3, :3], masked_pointcloud_ref.T).T + tar_T_ref[:3, 3]

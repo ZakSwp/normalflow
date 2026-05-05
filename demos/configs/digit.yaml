@@ -9,6 +9,3 @@ imgw: 320
 raw_imgh: 480
 raw_imgw: 640
 framerate: 60
-# Path to calibration model (absolute, or relative to this config file)
-# calibration_model_path: "/home/zakaria/Desktop/gelslam/gelslam/src/gelslam/resources/example_calibration/model/nnmodel_digit.pth"
-

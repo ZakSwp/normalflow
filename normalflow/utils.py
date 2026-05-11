@@ -226,7 +226,7 @@ def get_backproj_laplacian(L_tar, C_tar, masked_pointcloud_ref, tar_T_ref, ppmm=
 
 def render_surface_info(G, H, C):
     pass
-def render_surface_info_video(frames, output_path='surface_info.mp4', fps=10):
+def render_surface_info_video_deprecated(frames, output_path='surface_info.mp4', fps=10):
     """
     frames: list of (G, H, C) tuples
     """
@@ -324,3 +324,116 @@ def intialize_debug_folders(folderList):
             shutil.rmtree(folder)
         os.makedirs(folder)
         print("Initialized folder "+ folder + "\n")
+
+
+def robust_normalize(arr, low=2, high=98):
+    p_low, p_high = np.percentile(arr, low), np.percentile(arr, high)
+    return np.clip((arr - p_low) / (p_high - p_low + 1e-8), 0, 1)
+
+def robust_normalize_symmetric(arr, percentile=98):
+    bound = np.percentile(np.abs(arr), percentile)
+    return np.clip(arr / (bound + 1e-8), -1, 1)
+
+
+def minmax_normalize(arr, low=-100, high=90):
+    return np.clip((arr - low) / (high - low + 1e-8), 0, 1)
+
+def minmax_normalize_symmetric(arr, high=90):
+    return np.clip(arr / (high + 1e-8), -1, 1)
+
+
+def fig_to_bgr(fig):
+    fig.canvas.draw()
+    buf = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+    buf = buf.reshape(fig.canvas.get_width_height()[::-1] + (4,))
+    return cv2.cvtColor(buf[:, :, :3], cv2.COLOR_RGB2BGR)
+
+def make_crash_frame(error_msg):
+    fig, ax = plt.subplots(figsize=(12, 8))
+    fig.patch.set_facecolor('black')
+    ax.set_facecolor('black')
+    ax.axis('off')
+    ax.text(0.5, 0.5, f"CRASH\n{error_msg}",
+            color='red', fontsize=28, fontweight='bold',
+            ha='center', va='center',
+            transform=ax.transAxes, wrap=True)
+    frame = fig_to_bgr(fig)
+    plt.close(fig)
+    return frame
+
+def make_grad_frame(G, normalization = "robust"):
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    if normalization == "robust":
+        gx_norm = robust_normalize_symmetric(G[:, :, 0])
+        gy_norm = robust_normalize_symmetric(G[:, :, 1])
+        mag_norm = robust_normalize(np.linalg.norm(G, axis=2))
+    else:
+        gx_norm = minmax_normalize_symmetric(G[:, :, 0])
+        gy_norm = minmax_normalize_symmetric(G[:, :, 1])
+        mag_norm = minmax_normalize(np.linalg.norm(G, axis=2))
+    im0 = axes[0, 0].imshow(gx_norm, cmap='bwr', vmin=-1, vmax=1)
+    axes[0, 0].set_title('Gradient X')
+    plt.colorbar(im0, ax=axes[0, 0])
+
+    im1 = axes[0, 1].imshow(gy_norm, cmap='bwr', vmin=-1, vmax=1)
+    axes[0, 1].set_title('Gradient Y')
+    plt.colorbar(im1, ax=axes[0, 1])
+
+    im2 = axes[1, 0].imshow(mag_norm, cmap='hot', vmin=0, vmax=1)
+    axes[1, 0].set_title('Gradient Amplitude')
+    plt.colorbar(im2, ax=axes[1, 0])
+
+    step = 10
+    Y, X = np.mgrid[0:G.shape[0]:step, 0:G.shape[1]:step]
+    axes[1, 1].quiver(X, Y, G[::step, ::step, 0], -G[::step, ::step, 1])
+    axes[1, 1].set_title('Gradient Field')
+    axes[1, 1].invert_yaxis()
+
+    plt.tight_layout()
+    frame = fig_to_bgr(fig)
+    plt.close(fig)
+    return frame
+
+def make_mask_frame(C):
+    fig, ax = plt.subplots(1, 1, figsize=(6, 5))
+    ax.imshow(C, cmap='gray')
+    ax.set_title('Contact Mask')
+    plt.tight_layout()
+    frame = fig_to_bgr(fig)
+    plt.close(fig)
+    return frame
+
+def render_surface_info_video(frames, output_path='surface_info.mp4', fps=10, normalization = "robust"):
+    """
+    frames: list of (G, H, C) tuples
+    Produces two videos:
+      - output_path           → gradient X, Y, amplitude, field
+      - <base>_mask<ext>      → contact mask
+    """
+    base, ext = os.path.splitext(output_path)
+    mask_output_path = f"{base}_mask{ext}"
+
+    grad_writer = None
+    mask_writer = None
+
+    def write(writer, path, frame):
+        if writer is None:
+            h, w = frame.shape[:2]
+            writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+        writer.write(frame)
+        return writer
+
+    for G, H, C in tqdm(frames):
+        if isinstance(G, str) and G == "CRASH":
+            crash_frame = make_crash_frame(H)
+            grad_writer = write(grad_writer, output_path, crash_frame)
+            mask_writer = write(mask_writer, mask_output_path, crash_frame)
+            continue
+
+        grad_writer = write(grad_writer, output_path, make_grad_frame(G, normalization = "robust"))
+        mask_writer = write(mask_writer, mask_output_path, make_mask_frame(C))
+
+    for writer, path in [(grad_writer, output_path), (mask_writer, mask_output_path)]:
+        if writer:
+            writer.release()
+            print(f"Saved to {path}")

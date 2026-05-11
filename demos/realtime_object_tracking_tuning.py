@@ -9,7 +9,7 @@ import yaml
 from gs_sdk.gs_device import Camera, FastCamera
 from gs_sdk.gs_reconstruct import Reconstructor
 from normalflow.registration import normalflow, LoseTrackError
-from normalflow.utils import Frame, render_surface_info_video, intialize_debug_folders
+from normalflow.utils import Frame, render_surface_info_video, intialize_debug_folders, render_surface_info_video_deprecated
 from normalflow.viz_utils import annotate_coordinate_system
 
 

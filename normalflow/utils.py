@@ -246,7 +246,7 @@ def robust_normalize_symmetric(arr, percentile=98):
     return np.clip(arr / (bound + 1e-8), -1, 1)
 
 
-def minmax_normalize(arr, low=-100, high=90):
+def minmax_normalize(arr, low=-100, high=90): #Minimazies to an absolute threshold for comparing two different gradients.
     return np.clip((arr - low) / (high - low + 1e-8), 0, 1)
 
 def minmax_normalize_symmetric(arr, high=90):

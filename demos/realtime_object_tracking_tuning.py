@@ -9,7 +9,7 @@ import yaml
 from gs_sdk.gs_device import Camera, FastCamera
 from gs_sdk.gs_reconstruct import Reconstructor
 from normalflow.registration import normalflow, LoseTrackError
-from normalflow.utils import Frame, render_surface_info_video, intialize_debug_folders, render_surface_info_video_deprecated
+from normalflow.utils import Frame, render_surface_info_video, intialize_debug_folders, render_subtracted_video
 from normalflow.viz_utils import annotate_coordinate_system
 
 
@@ -21,11 +21,11 @@ import time
 VIDIOC_QUERYCAP = 0x80685600
 V4L2_CAP_VIDEO_CAPTURE = 0x00000001
 
-folderList = ["/home/zakaria/Desktop/normalflow/debug_diff/collapsed", "/home/zakaria/Desktop/normalflow/debug_diff/raw"]
-intialize_debug_folders(folderList)
+debugPath= "./normalflow_results"
+intialize_debug_folders(debugPath)
 SENSOR_MAP = {
-    "DIGIT":        ["/home/zakaria/Desktop/normalflow/demos/configs/digit.yaml", "/home/zakaria/Desktop/normalflow/demos/models/digit/nnmodel_digit_2.pth"],
-    "GelSight Mini": ["/home/zakaria/Desktop/normalflow/demos/configs/gsmini.yaml","nnmodel.pth"], #replace model with nnmodel.pth
+    "DIGIT":        ["./digit.yaml", "./digit/nnmodel_digit_2.pth"],
+    "GelSight Mini": ["./configs/gsmini.yaml","nnmodel.pth"], #replace model with nnmodel.pth
  }
 
 #"/home/zakaria/Desktop/normalflow/demos/models/gsmini/nnmodel_gsmini_decalib.pth"
@@ -123,7 +123,7 @@ def realtime_object_tracking():
     with open(args.config_path, "r") as f:
         config = yaml.safe_load(f)
         device_name = config["device_name"]
-        #device_name = input("Type device name (i.e. DIGIT or GelSight Mini)")
+        #device_name = input("Type device name (i.e. DIGIT or GelSight Mini)") TODO: Delete
         ppmm = config["ppmm"]
         imgh = config["imgh"]
         imgw = config["imgw"]
@@ -153,12 +153,14 @@ def realtime_object_tracking():
     print("\nStart object tracking, Press any key to quit.\n")
     is_running = True
     frames = []
+    raw_frames = []
 
     while is_running:
         image = device.get_image()
         G, H, C = recon.get_surface_info(image, ppmm)
         frames.append((G, H, C))
-        #print("No contact. {} > {}".format(np.sum(C), 500)) #TODO: Delete
+        raw_frames.append(image)
+
 
         print("RECORDING")
         frame = Frame(G, H, C)
@@ -173,6 +175,7 @@ def realtime_object_tracking():
                 # Tracking a new object, wait 2 frames for the contact to stabilize
                 for _ in range(2):
                     image = device.get_image()
+                    raw_frames.append(image)
                     resize_show(image)
                     key = cv2.waitKey(1)
 
@@ -180,6 +183,7 @@ def realtime_object_tracking():
                 image_start = device.get_image()
                 G_start, H_start, C_start = recon.get_surface_info(image_start, ppmm)
                 frames.append((G_start, H_start, C_start))
+                raw_frames.append(image_start)
                 print("RECORDING")
 
                 frame_start = Frame(G_start, H_start, C_start)
@@ -207,6 +211,7 @@ def realtime_object_tracking():
                     image_curr = device.get_image()
                     G_curr, H_curr, C_curr = recon.get_surface_info(image_curr, ppmm)
                     frames.append((G_curr, H_curr, C_curr))
+                    raw_frames.append(image_curr)
                     print("RECORDING")
                     frame_curr = Frame(G_curr, H_curr, C_curr)
                     if not frame_curr.is_contacted:
@@ -231,12 +236,10 @@ def realtime_object_tracking():
                             #scr_threshold=1.00,
                             #ccs_threshold=1.00,
                         )
-                        #print("NORMAL FLOW WITH HIGH THRESHOLD FOR TRANSFORMATION ESTIMATION") #TODO: Delete
                         frame_prev = frame_curr
                         prev_T_ref = curr_T_ref
                     except LoseTrackError:
                         # Reset reference frame as the previous frame
-                        #print("SETTING REF FRAME AS PREV") #TODO: Delete
                         frame_ref = frame_prev
                         start_T_ref = start_T_ref @ np.linalg.inv(prev_T_ref)
                         prev_T_ref = np.eye(4, dtype=np.float32)
@@ -257,7 +260,6 @@ def realtime_object_tracking():
                                 scr_threshold=0.0,
                                 ccs_threshold=0.0,
                             )
-                            print("DISABLING THRESHOLD FOR CONSEC FRAME TRACKING") #TODO: Delete
                             frame_prev = frame_curr
                             prev_T_ref = curr_T_ref
                         except LoseTrackError:
@@ -266,7 +268,6 @@ def realtime_object_tracking():
                             is_tracking = False
                             break
                     
-                    #time.sleep(0.1) #TODO: Delete
                     # Display the object tracking result
                     image_l = image_start.copy()
                     cv2.putText(
@@ -332,23 +333,12 @@ def realtime_object_tracking():
                 print("Reconstruction error: {}".format(e))
                 frames.append(("CRASH", str(e), None))  # sentinel
                 pass
-#    try:
-#        # --- DEBUG ---
-#        debug_canvas = np.zeros_like((C * 255).astype(np.uint8))
-#        cv2.drawContours(debug_canvas, contours_start, -1, 255, 1)
-#        cv2.imshow("C mask", (C * 255).astype(np.uint8))
-#        cv2.imshow("findContours result", debug_canvas)
-#        cv2.waitKey(0)  # blocks until keypress — change to cv2.waitKey(1) if you want non-blocking
-#        print(f"Number of contours: {len(contours_start)}")
-#        for i, c in enumerate(contours_start):
-#            print(f"  contour {i}: {len(c)} points, area={cv2.contourArea(c):.2f}")
-#        # --- END DEBUG ---
-#    except:
-#        pass
 
     device.release()
+
     cv2.destroyAllWindows()
     render_surface_info_video(frames, output_path='tracking_run.mp4', fps=10)
+    render_subtracted_video(raw_frames, bg_image, output_path='tracking_run_subtracted.mp4', fps=10)
 
 
 if __name__ == "__main__":

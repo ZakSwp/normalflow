@@ -167,3 +167,4 @@ cython_debug/
 *.avi
 datasets/
 test.py
+.vscode

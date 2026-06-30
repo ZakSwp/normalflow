@@ -17,7 +17,7 @@ class Frame:
     """
     The frame data structure.
     """
-    def __init__(self, G, H, C, contact_threshold=500 ): #default: 500 for gsmini 56900 for digit
+    def __init__(self, G, H, C, contact_threshold=5600 ): #default: 500 for gsmini 56900 for digit
         """
         Initialize the frame with the gradient map, height map, and contact mask.
         """
@@ -229,12 +229,11 @@ def render_surface_info(G, H, C):
 
 
 
-def intialize_debug_folders(folderList):
-    for folder in folderList:
-        if os.path.exists(folder):
-            shutil.rmtree(folder)
-        os.makedirs(folder)
-        print("Initialized folder "+ folder + "\n")
+def intialize_debug_folders(path):
+    if os.path.exists(path):
+        shutil.rmtree(path)
+    os.makedirs(path)
+    print("Initialized folder "+ path + "\n")
 
 
 def robust_normalize(arr, low=2, high=98):
@@ -245,8 +244,8 @@ def robust_normalize_symmetric(arr, percentile=98):
     bound = np.percentile(np.abs(arr), percentile)
     return np.clip(arr / (bound + 1e-8), -1, 1)
 
-
-def minmax_normalize(arr, low=-100, high=90): #Minimazies to an absolute threshold for comparing two different gradients.
+#For comparing different gradients clips
+def minmax_normalize(arr, low=-100, high=90): 
     return np.clip((arr - low) / (high - low + 1e-8), 0, 1)
 
 def minmax_normalize_symmetric(arr, high=90):
@@ -314,8 +313,8 @@ def make_mask_frame(C):
     plt.close(fig)
     return frame
 
-def render_surface_info_video(frames, output_path='surface_info.mp4', fps=10, normalization = "robust"):
-    """
+def render_surface_info_video(frames, output_path='normalflow_results/surface_info.mp4', fps=10, normalization = "robust"):
+    """ 
     frames: list of (G, H, C) tuples
     Produces two videos:
       - output_path           → gradient X, Y, amplitude, field
@@ -341,10 +340,38 @@ def render_surface_info_video(frames, output_path='surface_info.mp4', fps=10, no
             mask_writer = write(mask_writer, mask_output_path, crash_frame)
             continue
 
-        grad_writer = write(grad_writer, output_path, make_grad_frame(G, normalization = "robust"))
+        grad_writer = write(grad_writer, output_path, make_grad_frame(G, normalization))
         mask_writer = write(mask_writer, mask_output_path, make_mask_frame(C))
 
     for writer, path in [(grad_writer, output_path), (mask_writer, mask_output_path)]:
         if writer:
             writer.release()
             print(f"Saved to {path}")
+
+
+def render_subtracted_video(raw_frames, bg_image, output_path, fps=10):
+    # Accept either PIL Image or numpy array for bg_image
+    if hasattr(bg_image, "convert"):
+        bg = np.array(bg_image.convert("RGB"), dtype=np.float32)
+    else:
+        bg = bg_image.astype(np.float32)
+
+    h, w = bg.shape[:2]
+    writer = cv2.VideoWriter(
+        output_path,
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        fps,
+        (w, h),
+    )
+
+    for frame in tqdm(raw_frames):
+        if hasattr(frame, "convert"):
+            frame_np = np.array(frame.convert("RGB"), dtype=np.float32)
+        else:
+            frame_np = frame.astype(np.float32)
+
+        diff = np.clip(np.abs(frame_np - bg), 0, 255).astype(np.uint8)
+        writer.write(cv2.cvtColor(diff, cv2.COLOR_RGB2BGR))
+
+    writer.release()
+    print(f"Saved raw subtraction to {output_path}")

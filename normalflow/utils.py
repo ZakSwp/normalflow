@@ -223,13 +223,7 @@ def get_backproj_laplacian(L_tar, C_tar, masked_pointcloud_ref, tar_T_ref, ppmm=
     masked_C_tar_backproj = np.logical_and(masked_C_tar_backproj, xy_region)
     return masked_L_tar_backproj, masked_C_tar_backproj
 
-
-def render_surface_info(G, H, C):
-    pass
-
-
-
-def intialize_debug_folders(path):
+def intialize_debug_folder(path):
     if os.path.exists(path):
         shutil.rmtree(path)
     os.makedirs(path)
@@ -313,11 +307,11 @@ def make_mask_frame(C):
     plt.close(fig)
     return frame
 
-def render_surface_info_video(frames, output_path='normalflow_results/surface_info.mp4', fps=10, normalization = "robust"):
+def render_surface_info_video(frames, output_path, fps=10, normalization:str = "robust"):
     """ 
     frames: list of (G, H, C) tuples
     Produces two videos:
-      - output_path           → gradient X, Y, amplitude, field
+      - output_path           → gradient amplitude, field
       - <base>_mask<ext>      → contact mask
     """
     base, ext = os.path.splitext(output_path)

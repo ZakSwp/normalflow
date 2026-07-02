@@ -9,7 +9,7 @@ import yaml
 from gs_sdk.gs_device import Camera, FastCamera
 from gs_sdk.gs_reconstruct import Reconstructor
 from normalflow.registration import normalflow, LoseTrackError
-from normalflow.utils import Frame, render_surface_info_video, intialize_debug_folders, render_subtracted_video
+from normalflow.utils import Frame, render_surface_info_video, intialize_debug_folder, render_subtracted_video
 from normalflow.viz_utils import annotate_coordinate_system
 
 
@@ -21,14 +21,12 @@ import time
 VIDIOC_QUERYCAP = 0x80685600
 V4L2_CAP_VIDEO_CAPTURE = 0x00000001
 
-debugPath= "./normalflow_results"
-intialize_debug_folders(debugPath)
+intialize_debug_folder("/home/zakaria/Desktop/normalflow/visualization_results")
 SENSOR_MAP = {
-    "DIGIT":        ["./digit.yaml", "./digit/nnmodel_digit_2.pth"],
-    "GelSight Mini": ["./configs/gsmini.yaml","nnmodel.pth"], #replace model with nnmodel.pth
+    "DIGIT":        ["./configs/digit.yaml", "./models/digit/nnmodel_digit_2.pth"],
+    "GelSight Mini": ["./configs/gsmini.yaml","./models/gsmini/nnmodel.pth"],
  }
 
-#"/home/zakaria/Desktop/normalflow/demos/models/gsmini/nnmodel_gsmini_decalib.pth"
 def is_capture_node(dev_id):
     fmt = "16s32s32sII4I"
     buf = struct.pack(fmt, b"", b"", b"", 0, 0, 0, 0, 0, 0)
@@ -64,18 +62,18 @@ def detect_sensor():
 """
 Usage:
     python realtime_object_tracking.py [--calib_model_path CALIB_MODEL_PATH] [--config_path CONFIG_PATH] [--device {cpu, cuda}]
-
+    File paths default to local config and model paths for gelsight mini and DIGIT.
 Press any key to quit the streaming session.
 """
 
-
+print("Starting modified real-time object tracking demo with contact frame delta and gx/gy gradient recording.")
 detected = detect_sensor()
 if detected is None:
     raise RuntimeError("No tactile sensor found.")
-
-calib_model_path = os.path.join(os.path.dirname(__file__), "models", detected["model"]) #nnmodel.pth
-config_path = os.path.join(os.path.dirname(__file__), "configs", detected["config"]) #gsmini.yaml
-print("Running normalflow with {} sensor, {} config file".format(detected["sensor"],detected["config"]))
+elif detected["sensor"] in SENSOR_MAP.keys():
+    calib_model_path = os.path.join(os.path.dirname(__file__), detected["model"]) #nnmodel.pth
+    config_path = os.path.join(os.path.dirname(__file__), detected["config"]) #gsmini.yaml
+    print("Running with config file at: {}".format(config_path))    
 
 def resize_show(image, frame_name="frame", scale=2.5):
     image = cv2.resize(image, (0, 0), fx=scale, fy=scale)
@@ -85,7 +83,7 @@ def resize_show(image, frame_name="frame", scale=2.5):
 def realtime_object_tracking():
     # Argument Parser
     parser = argparse.ArgumentParser(
-        description="Real-time tracking the object using tactile sensors."
+        description="Real-time tracking the object using tactile sensors. Modified to record contact frame deltas and gx/gy gradient values. Output saved to visualization_results folder."
     )
     parser.add_argument(
         "-b",
@@ -178,7 +176,8 @@ def realtime_object_tracking():
                     raw_frames.append(image)
                     resize_show(image)
                     key = cv2.waitKey(1)
-
+                    if frame.is_contacted:
+                        break
                 # Get the surface information of the reference frame (key frame)
                 image_start = device.get_image()
                 G_start, H_start, C_start = recon.get_surface_info(image_start, ppmm)
@@ -233,8 +232,6 @@ def realtime_object_tracking():
                             frame_curr.L,
                             prev_T_ref,
                             ppmm,
-                            #scr_threshold=1.00,
-                            #ccs_threshold=1.00,
                         )
                         frame_prev = frame_curr
                         prev_T_ref = curr_T_ref
@@ -330,7 +327,10 @@ def realtime_object_tracking():
                         is_tracking = False
                         is_running = False
             except Exception as e:
-                print("Reconstruction error: {}".format(e))
+                if e == ZeroDivisionError:
+                    print("Contact disrupted during contact confirmation loop: {}.".format(e))
+                else:
+                    print("Reconstruction error: {}".format(e))
                 frames.append(("CRASH", str(e), None))  # sentinel
                 pass
 

@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
 import cv2
@@ -9,7 +10,7 @@ import yaml
 from gs_sdk.gs_device import Camera, FastCamera
 from gs_sdk.gs_reconstruct import Reconstructor
 from normalflow.registration import normalflow, LoseTrackError
-from normalflow.utils import Frame, render_surface_info_video, intialize_debug_folder, render_subtracted_video
+from normalflow.utils import Frame, render_surface_info_video, intialize_debug_folder, render_subtracted_video, render_video
 from normalflow.viz_utils import annotate_coordinate_system
 
 
@@ -20,8 +21,7 @@ import struct
 import time
 VIDIOC_QUERYCAP = 0x80685600
 V4L2_CAP_VIDEO_CAPTURE = 0x00000001
-
-intialize_debug_folder("/home/zakaria/Desktop/normalflow/visualization_results")
+CLIP_OUTPUT,IDX = intialize_debug_folder("/home/zakaria/Desktop/normalflow/captures/07.14.26/cap_0")
 SENSOR_MAP = {
     "DIGIT":        ["./configs/digit.yaml", "./models/digit/nnmodel_digit_2.pth"],
     "GelSight Mini": ["./configs/gsmini.yaml","./models/gsmini/nnmodel.pth"],
@@ -63,7 +63,7 @@ def detect_sensor():
 Usage:
     python realtime_object_tracking.py [--calib_model_path CALIB_MODEL_PATH] [--config_path CONFIG_PATH] [--device {cpu, cuda}]
     File paths default to local config and model paths for gelsight mini and DIGIT.
-Press any key to quit the streaming session.
+Press 'r' to start/stop recording (each start/stop cycle is saved as its own clip). Press 'q' to quit the streaming session.
 """
 
 print("Starting modified real-time object tracking demo with contact frame delta and gx/gy gradient recording.")
@@ -75,9 +75,87 @@ elif detected["sensor"] in SENSOR_MAP.keys():
     config_path = os.path.join(os.path.dirname(__file__), detected["config"]) #gsmini.yaml
     print("Running with config file at: {}".format(config_path))    
 
-def resize_show(image, frame_name="frame", scale=2.5):
+def resize_show(image, frame_name="frame", scale=2.5, is_recording=False):
+    image = image.copy()
+    if is_recording:
+        cv2.circle(image, (image.shape[1] - 15, 15), 8, (0, 0, 255), -1)
+        cv2.putText(
+            image,
+            "REC",
+            (image.shape[1] - 55, 22),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 0, 255),
+            2,
+        )
     image = cv2.resize(image, (0, 0), fx=scale, fy=scale)
     cv2.imshow(frame_name, image)
+
+
+def show_frame_count(is_recording, count):
+    """
+    Print the current frame count in place (overwriting the same terminal
+    line via a carriage return) so it updates live without spamming the
+    terminal with a new line per frame.
+    """
+    if is_recording:
+        text = "Recording... frames captured: {:6d}".format(count)
+    else:
+        text = "Idle (press 'r' to start recording)"
+    # Pad with trailing spaces so a shorter message fully overwrites a longer one.
+    sys.stdout.write("\r" + text.ljust(50))
+    sys.stdout.flush()
+
+
+def handle_key(key, is_recording):
+    """
+    Interpret a key press.
+    'r' toggles recording on/off.
+    'q' (or ESC) requests the program to quit.
+    Returns (is_recording, should_quit, just_stopped), where just_stopped is
+    True only on the exact frame that recording transitions from on -> off.
+    """
+    should_quit = False
+    just_stopped = False
+    if key == -1:
+        return is_recording, should_quit, just_stopped
+    key &= 0xFF
+    if key in (ord("r"), ord("R")):
+        was_recording = is_recording
+        is_recording = not is_recording
+        if was_recording and not is_recording:
+            just_stopped = True
+        print("\n" + ("Recording STARTED." if is_recording else "Recording STOPPED."))
+    elif key in (ord("q"), ord("Q"), 27):  # 'q' or ESC
+        should_quit = True
+    return is_recording, should_quit, just_stopped
+
+
+def save_clip(frames, raw_frames, bg_image, clip_index):
+    """
+    Render and save one recording segment ("clip") to disk immediately.
+    Each clip gets its own set of output files so consecutive start/stop
+    cycles never get merged into the same video.
+    """
+    if not frames:
+        return
+    tag = "clip{:03d}".format(clip_index)
+    print("Saving {} ({} frames) ...".format(tag, len(frames)))
+    render_surface_info_video(
+        frames, output_path=CLIP_OUTPUT + "/{}_{}.mp4".format(IDX,tag), fps=10
+    )
+    render_subtracted_video(
+        raw_frames,
+        bg_image,
+        output_path=CLIP_OUTPUT + "/{}_{}_sub.mp4".format(IDX,tag),
+        fps=10,
+    )
+    render_video(
+        raw_frames,
+        output_path=CLIP_OUTPUT + "/{}_{}_raw.mp4".format(IDX,tag),
+        fps=10,
+    )
+    print("Saved {}.".format(tag))
 
 
 def realtime_object_tracking():
@@ -148,24 +226,34 @@ def realtime_object_tracking():
     print("Done with background collection.")
 
     # Real-time object tracking
-    print("\nStart object tracking, Press any key to quit.\n")
+    print("\nStart object tracking. Press 'r' to start/stop recording, 'q' to quit.\n")
     is_running = True
+    is_recording = False
+    clip_index = 1
+    any_clip_recorded = False
     frames = []
     raw_frames = []
 
     while is_running:
         image = device.get_image()
         G, H, C = recon.get_surface_info(image, ppmm)
-        frames.append((G, H, C))
-        raw_frames.append(image)
+        if is_recording:
+            frames.append((G, H, C))
+            raw_frames.append(image)
+        show_frame_count(is_recording, len(frames))
 
-
-        print("RECORDING")
         frame = Frame(G, H, C)
         if not frame.is_contacted:
-            resize_show(image)
+            resize_show(image, is_recording=is_recording)
             key = cv2.waitKey(1)
-            if key != -1:
+            is_recording, should_quit, just_stopped = handle_key(key, is_recording)
+            if just_stopped:
+                save_clip(frames, raw_frames, bg_image, clip_index)
+                clip_index += 1
+                any_clip_recorded = True
+                frames = []
+                raw_frames = []
+            if should_quit:
                 is_running = False
             continue
         else:
@@ -173,17 +261,29 @@ def realtime_object_tracking():
                 # Tracking a new object, wait 2 frames for the contact to stabilize
                 for _ in range(2):
                     image = device.get_image()
-                    raw_frames.append(image)
-                    resize_show(image)
+                    if is_recording:
+                        raw_frames.append(image)
+                    show_frame_count(is_recording, len(raw_frames))
+                    resize_show(image, is_recording=is_recording)
                     key = cv2.waitKey(1)
+                    is_recording, should_quit, just_stopped = handle_key(key, is_recording)
+                    if just_stopped:
+                        save_clip(frames, raw_frames, bg_image, clip_index)
+                        clip_index += 1
+                        any_clip_recorded = True
+                        frames = []
+                        raw_frames = []
+                    if should_quit:
+                        is_running = False
+                        break
                     if frame.is_contacted:
                         break
                 # Get the surface information of the reference frame (key frame)
                 image_start = device.get_image()
                 G_start, H_start, C_start = recon.get_surface_info(image_start, ppmm)
-                frames.append((G_start, H_start, C_start))
-                raw_frames.append(image_start)
-                print("RECORDING")
+                if is_recording:
+                    frames.append((G_start, H_start, C_start))
+                    raw_frames.append(image_start)
 
                 frame_start = Frame(G_start, H_start, C_start)
                 # For display purpose, get the largest contour and its center
@@ -204,20 +304,18 @@ def realtime_object_tracking():
                 prev_T_ref = np.eye(4, dtype=np.float32)
                 start_T_ref = np.eye(4, dtype=np.float32)
                 is_tracking = True
-                print("STARTING VALUES: C Sum: {}".format(np.sum(C_start)))
                 while is_tracking:
                     # Get the surface information of the current frame
                     image_curr = device.get_image()
                     G_curr, H_curr, C_curr = recon.get_surface_info(image_curr, ppmm)
-                    frames.append((G_curr, H_curr, C_curr))
-                    raw_frames.append(image_curr)
-                    print("RECORDING")
+                    if is_recording:
+                        frames.append((G_curr, H_curr, C_curr))
+                        raw_frames.append(image_curr)
+                    show_frame_count(is_recording, len(frames))
                     frame_curr = Frame(G_curr, H_curr, C_curr)
                     if not frame_curr.is_contacted:
                         is_tracking = False
-                        print("STOPPED TRACKING")
                         break
-                    print("Frame contact verified. {} > {}".format(np.sum(frame_curr.C), 500)) #TODO: Delete
 
                     # Use NormalFlow to estimate the transformation
                     try:
@@ -321,9 +419,18 @@ def realtime_object_tracking():
                     )
 
                     # Display
-                    resize_show(cv2.hconcat([image_l, image_r]))
+                    resize_show(
+                        cv2.hconcat([image_l, image_r]), is_recording=is_recording
+                    )
                     key = cv2.waitKey(1)
-                    if key != -1:
+                    is_recording, should_quit, just_stopped = handle_key(key, is_recording)
+                    if just_stopped:
+                        save_clip(frames, raw_frames, bg_image, clip_index)
+                        clip_index += 1
+                        any_clip_recorded = True
+                        frames = []
+                        raw_frames = []
+                    if should_quit:
                         is_tracking = False
                         is_running = False
             except Exception as e:
@@ -331,15 +438,22 @@ def realtime_object_tracking():
                     print("Contact disrupted during contact confirmation loop: {}.".format(e))
                 else:
                     print("Reconstruction error: {}".format(e))
-                frames.append(("CRASH", str(e), None))  # sentinel
+                if is_recording:
+                    frames.append(("CRASH", str(e), None))  # sentinel
                 pass
 
     device.release()
-
     cv2.destroyAllWindows()
-    render_surface_info_video(frames, output_path='tracking_run.mp4', fps=10)
-    render_subtracted_video(raw_frames, bg_image, output_path='tracking_run_subtracted.mp4', fps=10)
+    print()  # move off the in-place frame-count line
 
+    # If we quit while a recording was still in progress (never toggled off),
+    # save whatever was captured as one final clip so it isn't lost.
+    if is_recording and frames:
+        save_clip(frames, raw_frames, bg_image, clip_index)
+        any_clip_recorded = True
+
+    if not any_clip_recorded:
+        print("No clips were recorded (recording was never started).")
 
 if __name__ == "__main__":
     realtime_object_tracking()

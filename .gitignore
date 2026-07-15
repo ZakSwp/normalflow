@@ -168,3 +168,5 @@ cython_debug/
 datasets/
 test.py
 .vscode
+*.csv
+*.csv#

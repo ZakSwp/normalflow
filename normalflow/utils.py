@@ -6,7 +6,7 @@ import numpy as np
 from scipy.ndimage import binary_erosion
 from scipy.spatial.transform import Rotation as R
 
-
+from pathlib import Path
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -223,11 +223,15 @@ def get_backproj_laplacian(L_tar, C_tar, masked_pointcloud_ref, tar_T_ref, ppmm=
     masked_C_tar_backproj = np.logical_and(masked_C_tar_backproj, xy_region)
     return masked_L_tar_backproj, masked_C_tar_backproj
 
-def intialize_debug_folder(path):
-    if os.path.exists(path):
-        shutil.rmtree(path)
-    os.makedirs(path)
-    print("Initialized folder "+ path + "\n")
+def intialize_debug_folder(base):
+    prefix = base[:-2]
+    idx = 0
+    while os.path.exists(base):
+        idx+=1
+        base = prefix + "_" + str(idx)
+    os.makedirs(base)
+    print("Initialized folder "+ base + "\n")
+    return(base,idx)
 
 
 def robust_normalize(arr, low=2, high=98):
@@ -299,23 +303,20 @@ def make_grad_frame(G, normalization = "robust"):
     return frame
 
 def make_mask_frame(C):
-    fig, ax = plt.subplots(1, 1, figsize=(6, 5))
-    ax.imshow(C, cmap='gray')
-    ax.set_title('Contact Mask')
-    plt.tight_layout()
-    frame = fig_to_bgr(fig)
-    plt.close(fig)
-    return frame
+    return cv2.cvtColor((C.astype(np.uint8) * 255), cv2.COLOR_GRAY2BGR)
 
 def render_surface_info_video(frames, output_path, fps=10, normalization:str = "robust"):
+    #output path needs to contain only the base name for the video. This method handles formatting output path to distinguish mask and gradient videos.
     """ 
     frames: list of (G, H, C) tuples
     Produces two videos:
       - output_path           → gradient amplitude, field
       - <base>_mask<ext>      → contact mask
     """
+    output_path = str(output_path)
     base, ext = os.path.splitext(output_path)
     mask_output_path = f"{base}_mask{ext}"
+    grad_output_path = f"{base}_grad{ext}"
 
     grad_writer = None
     mask_writer = None
@@ -330,11 +331,11 @@ def render_surface_info_video(frames, output_path, fps=10, normalization:str = "
     for G, H, C in tqdm(frames):
         if isinstance(G, str) and G == "CRASH":
             crash_frame = make_crash_frame(H)
-            grad_writer = write(grad_writer, output_path, crash_frame)
+            grad_writer = write(grad_writer, grad_output_path, crash_frame)
             mask_writer = write(mask_writer, mask_output_path, crash_frame)
             continue
 
-        grad_writer = write(grad_writer, output_path, make_grad_frame(G, normalization))
+        grad_writer = write(grad_writer, grad_output_path, make_grad_frame(G, normalization))
         mask_writer = write(mask_writer, mask_output_path, make_mask_frame(C))
 
     for writer, path in [(grad_writer, output_path), (mask_writer, mask_output_path)]:
@@ -343,12 +344,28 @@ def render_surface_info_video(frames, output_path, fps=10, normalization:str = "
             print(f"Saved to {path}")
 
 
+def render_video(raw_frames, output_path, fps=10):
+    # Accept either PIL Image or numpy array for bg_image
+    h, w = raw_frames[0].shape[:2]
+    writer = cv2.VideoWriter(
+        output_path,
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        fps,
+        (w, h),
+    )
+
+    for frame in tqdm(raw_frames):
+        writer.write(frame)
+
+    writer.release()
+    print(f"Saved raw video to {output_path}")
+
 def render_subtracted_video(raw_frames, bg_image, output_path, fps=10):
     # Accept either PIL Image or numpy array for bg_image
     if hasattr(bg_image, "convert"):
         bg = np.array(bg_image.convert("RGB"), dtype=np.float32)
     else:
-        bg = bg_image.astype(np.float32)
+        bg = bg_image
 
     h, w = bg.shape[:2]
     writer = cv2.VideoWriter(
@@ -362,10 +379,10 @@ def render_subtracted_video(raw_frames, bg_image, output_path, fps=10):
         if hasattr(frame, "convert"):
             frame_np = np.array(frame.convert("RGB"), dtype=np.float32)
         else:
-            frame_np = frame.astype(np.float32)
+            frame_np = frame
 
-        diff = np.clip(np.abs(frame_np - bg), 0, 255).astype(np.uint8)
-        writer.write(cv2.cvtColor(diff, cv2.COLOR_RGB2BGR))
+        diff = cv2.absdiff(frame_np, bg)
+        writer.write(diff)
 
     writer.release()
     print(f"Saved raw subtraction to {output_path}")

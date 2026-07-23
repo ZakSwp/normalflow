@@ -21,7 +21,7 @@ import struct
 import time
 VIDIOC_QUERYCAP = 0x80685600
 V4L2_CAP_VIDEO_CAPTURE = 0x00000001
-CLIP_OUTPUT,IDX = intialize_debug_folder("/home/zakaria/Desktop/normalflow/captures/07.14.26/cap_0")
+CLIP_OUTPUT,IDX = intialize_debug_folder("/home/zakaria/Desktop/normalflow/captures/07.23.26/cap_0")
 SENSOR_MAP = {
     "DIGIT":        ["./configs/digit.yaml", "./models/digit/nnmodel_digit_2.pth"],
     "GelSight Mini": ["./configs/gsmini.yaml","./models/gsmini/nnmodel.pth"],

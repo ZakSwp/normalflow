@@ -310,8 +310,8 @@ def render_surface_info_video(frames, output_path, fps=10, normalization:str = "
     """ 
     frames: list of (G, H, C) tuples
     Produces two videos:
-      - output_path           → gradient amplitude, field
-      - <base>_mask<ext>      → contact mask
+      - output_path      : gradient amplitude, field
+      - <base>_mask<ext> : contact mask
     """
     output_path = str(output_path)
     base, ext = os.path.splitext(output_path)
